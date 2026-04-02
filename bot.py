@@ -138,6 +138,38 @@ def save_questions(data: dict[str, dict[str, list[dict[str, Any]]]]) -> None:
 QUESTIONS = load_questions()
 
 
+def get_category_names() -> list[str]:
+    return list(QUESTIONS.keys())
+
+
+def get_topic_names(category: str) -> list[str]:
+    return list(QUESTIONS.get(category, {}).keys())
+
+
+def get_category_by_index(index_str: str) -> str | None:
+    try:
+        index = int(index_str)
+    except ValueError:
+        return None
+
+    categories = get_category_names()
+    if 0 <= index < len(categories):
+        return categories[index]
+    return None
+
+
+def get_topic_by_index(category: str, index_str: str) -> str | None:
+    try:
+        index = int(index_str)
+    except ValueError:
+        return None
+
+    topics = get_topic_names(category)
+    if 0 <= index < len(topics):
+        return topics[index]
+    return None
+
+
 def get_user_key(update: Update) -> str:
     user = update.effective_user
     return str(user.id) if user else "unknown"
@@ -463,19 +495,21 @@ def build_finish_keyboard(mode: str = "test") -> InlineKeyboardMarkup:
 
 
 def build_categories_keyboard(prefix: str = "category") -> InlineKeyboardMarkup:
-    keyboard = [
-        [InlineKeyboardButton(category, callback_data=f"{prefix}:{category}")]
-        for category in QUESTIONS.keys()
-    ]
+    keyboard = []
+    for index, category in enumerate(get_category_names()):
+        keyboard.append(
+            [InlineKeyboardButton(category, callback_data=f"{prefix}:{index}")]
+        )
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_topics_keyboard(category: str, prefix: str = "topic") -> InlineKeyboardMarkup:
-    topics = QUESTIONS.get(category, {})
-    keyboard = [
-        [InlineKeyboardButton(topic.capitalize(), callback_data=f"{prefix}:{category}|{topic}")]
-        for topic in topics.keys()
-    ]
+    keyboard = []
+    for index, topic in enumerate(get_topic_names(category)):
+        keyboard.append(
+            [InlineKeyboardButton(topic.capitalize(), callback_data=f"{prefix}:{index}")]
+        )
+
     keyboard.append(
         [InlineKeyboardButton("⬅️ Назад к категориям", callback_data=f"back:categories|{prefix}")]
     )
@@ -484,22 +518,22 @@ def build_topics_keyboard(category: str, prefix: str = "topic") -> InlineKeyboar
 
 def build_difficulty_keyboard(category: str, topic: str) -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Easy", callback_data=f"difficulty:{category}|{topic}|easy")],
-        [InlineKeyboardButton("Medium", callback_data=f"difficulty:{category}|{topic}|medium")],
-        [InlineKeyboardButton("Hard", callback_data=f"difficulty:{category}|{topic}|hard")],
-        [InlineKeyboardButton("All", callback_data=f"difficulty:{category}|{topic}|all")],
-        [InlineKeyboardButton("⬅️ Назад к темам", callback_data=f"back:topics|{category}")],
+        [InlineKeyboardButton("Easy", callback_data="difficulty:easy")],
+        [InlineKeyboardButton("Medium", callback_data="difficulty:medium")],
+        [InlineKeyboardButton("Hard", callback_data="difficulty:hard")],
+        [InlineKeyboardButton("All", callback_data="difficulty:all")],
+        [InlineKeyboardButton("⬅️ Назад к темам", callback_data="back:topics")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def build_question_count_keyboard(category: str, topic: str, difficulty: str) -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("5", callback_data=f"count:{category}|{topic}|{difficulty}|5")],
-        [InlineKeyboardButton("10", callback_data=f"count:{category}|{topic}|{difficulty}|10")],
-        [InlineKeyboardButton("15", callback_data=f"count:{category}|{topic}|{difficulty}|15")],
-        [InlineKeyboardButton("Все доступные", callback_data=f"count:{category}|{topic}|{difficulty}|all")],
-        [InlineKeyboardButton("⬅️ Назад к сложности", callback_data=f"back:difficulty|{category}|{topic}")],
+        [InlineKeyboardButton("5", callback_data="count:5")],
+        [InlineKeyboardButton("10", callback_data="count:10")],
+        [InlineKeyboardButton("15", callback_data="count:15")],
+        [InlineKeyboardButton("Все доступные", callback_data="count:all")],
+        [InlineKeyboardButton("⬅️ Назад к сложности", callback_data="back:difficulty")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -909,9 +943,10 @@ async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
 
     data = query.data or ""
-    category = data.split(":", maxsplit=1)[1]
+    category_index = data.split(":", maxsplit=1)[1]
+    category = get_category_by_index(category_index)
 
-    if category not in QUESTIONS:
+    if not category or category not in QUESTIONS:
         await query.edit_message_text("⚠️ Такая категория не найдена.")
         return
 
@@ -932,9 +967,10 @@ async def exam_category_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     data = query.data or ""
-    category = data.split(":", maxsplit=1)[1]
+    category_index = data.split(":", maxsplit=1)[1]
+    category = get_category_by_index(category_index)
 
-    if category not in QUESTIONS:
+    if not category or category not in QUESTIONS:
         await query.edit_message_text("⚠️ Такая категория не найдена.")
         return
 
@@ -954,11 +990,17 @@ async def topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await query.answer()
 
-    payload = (query.data or "").split(":", maxsplit=1)[1]
-    category, topic = payload.split("|", maxsplit=1)
+    topic_index = (query.data or "").split(":", maxsplit=1)[1]
+    category = context.user_data.get("category")
 
+    if not category:
+        await query.edit_message_text("⚠️ Сначала выбери категорию.")
+        return
+
+    topic = get_topic_by_index(category, topic_index)
     category_data = QUESTIONS.get(category, {})
-    if topic not in category_data:
+
+    if not topic or topic not in category_data:
         await query.edit_message_text("⚠️ Такая тема не найдена.")
         return
 
@@ -981,13 +1023,18 @@ async def exam_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.answer()
 
-    payload = (query.data or "").split(":", maxsplit=1)[1]
-    category, topic = payload.split("|", maxsplit=1)
+    topic_index = (query.data or "").split(":", maxsplit=1)[1]
+    category = context.user_data.get("category")
 
+    if not category:
+        await query.edit_message_text("⚠️ Сначала выбери категорию.")
+        return
+
+    topic = get_topic_by_index(category, topic_index)
     category_data = QUESTIONS.get(category, {})
-    questions = category_data.get(topic, []).copy()
+    questions = category_data.get(topic, []).copy() if topic else []
 
-    if not questions:
+    if not topic or not questions:
         await query.edit_message_text("⚠️ Для этой темы пока нет вопросов.")
         return
 
@@ -1038,8 +1085,13 @@ async def difficulty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.answer()
 
-    payload = (query.data or "").split(":", maxsplit=1)[1]
-    category, topic, difficulty = payload.split("|", maxsplit=2)
+    difficulty = (query.data or "").split(":", maxsplit=1)[1]
+    category = context.user_data.get("category")
+    topic = context.user_data.get("topic")
+
+    if not category or not topic:
+        await query.edit_message_text("⚠️ Сначала выбери категорию и тему.")
+        return
 
     all_questions = QUESTIONS.get(category, {}).get(topic, [])
     filtered_questions = filter_questions_by_difficulty(all_questions, difficulty)
@@ -1073,8 +1125,14 @@ async def count_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await query.answer()
 
-    payload = (query.data or "").split(":", maxsplit=1)[1]
-    category, topic, difficulty, count_raw = payload.split("|", maxsplit=3)
+    count_raw = (query.data or "").split(":", maxsplit=1)[1]
+    category = context.user_data.get("category")
+    topic = context.user_data.get("topic")
+    difficulty = context.user_data.get("difficulty", "all")
+
+    if not category or not topic:
+        await query.edit_message_text("⚠️ Сначала выбери категорию и тему.")
+        return
 
     all_questions = QUESTIONS.get(category, {}).get(topic, [])
     filtered_questions = filter_questions_by_difficulty(all_questions, difficulty)
@@ -1143,16 +1201,32 @@ async def back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         return
 
-    if payload.startswith("topics|"):
-        category = payload.split("|", maxsplit=1)[1]
+    if payload == "topics":
+        category = context.user_data.get("category")
+        mode = context.user_data.get("mode", "test")
+
+        if not category:
+            await query.edit_message_text(
+                "🏫 Выбери категорию:",
+                reply_markup=build_categories_keyboard("examcategory" if mode == "exam" else "category"),
+            )
+            return
+
+        prefix = "examtopic" if mode == "exam" else "topic"
         await query.edit_message_text(
             f"📂 Категория: {category}\n\nТеперь выбери тему:",
-            reply_markup=build_topics_keyboard(category, "topic"),
+            reply_markup=build_topics_keyboard(category, prefix),
         )
         return
 
-    if payload.startswith("difficulty|"):
-        category, topic = payload.split("|", maxsplit=2)[1:]
+    if payload == "difficulty":
+        category = context.user_data.get("category")
+        topic = context.user_data.get("topic")
+
+        if not category or not topic:
+            await query.edit_message_text("⚠️ Сначала выбери категорию и тему.")
+            return
+
         await query.edit_message_text(
             f"📂 Категория: {category}\n"
             f"📘 Тема: {topic.capitalize()}\n\n"
@@ -1513,7 +1587,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def main() -> None:
     if not BOT_TOKEN:
-        raise ValueError("Вставь BOT_TOKEN в код.")
+        raise ValueError("Не найден BOT_TOKEN в переменных окружения.")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
